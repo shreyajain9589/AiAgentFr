@@ -5,7 +5,6 @@ import axios from "../config/axios";
 import { initializeSocket, receiveMessage, sendMessage } from "../config/socket";
 import Markdown from "markdown-to-jsx";
 import hljs from "highlight.js";
-import { getWebContainer } from "../config/webContainer";
 
 function SyntaxHighlightedCode(props) {
     const ref = useRef(null);
@@ -38,18 +37,16 @@ const Project = () => {
     const [currentFile, setCurrentFile] = useState(null);
     const [openFiles, setOpenFiles] = useState([]);
 
-    const [webContainer, setWebContainer] = useState(null);
-
     const messageBox = useRef(null);
 
-    /* ---------------------- AUTO SCROLL CHAT ----------------------- */
+    /* ---------------------- AUTO SCROLL ---------------------- */
     useEffect(() => {
         if (messageBox.current) {
             messageBox.current.scrollTop = messageBox.current.scrollHeight;
         }
     }, [messages]);
 
-    /* ---------------------- HANDLE USER SELECT ---------------------- */
+    /* ---------------------- SELECT USERS ---------------------- */
     const handleUserClick = (id) => {
         setSelectedUserId((prev) => {
             const s = new Set(prev);
@@ -59,17 +56,40 @@ const Project = () => {
     };
 
     /* ---------------------- ADD COLLAB ---------------------- */
-    function addCollaborators() {
-        axios
-            .put("/projects/add-user", {
+    async function addCollaborators() {
+        try {
+            await axios.put("/projects/add-user", {
                 projectId: project._id,
                 users: Array.from(selectedUserId),
-            })
-            .then((res) => {
-                setProject(res.data.project);
-                setIsModalOpen(false);
-            })
-            .catch((err) => console.log(err));
+            });
+
+            setIsModalOpen(false);
+
+            // ⭐ FIX: RE-FETCH PROJECT WITH POPULATED USERS
+            const res2 = await axios.get(`/projects/get-project/${project._id}`);
+            setProject(res2.data.project);
+
+            // Clear selection
+            setSelectedUserId(new Set());
+        } catch (err) {
+            console.log(err);
+        }
+    }
+
+    /* ---------------------- DELETE COLLAB ---------------------- */
+    async function removeCollaborator(userId) {
+        try {
+            await axios.put("/projects/remove-user", {
+                projectId: project._id,
+                userId,
+            });
+
+            // re-fetch project again to restore populated emails
+            const res = await axios.get(`/projects/get-project/${project._id}`);
+            setProject(res.data.project);
+        } catch (err) {
+            console.log(err);
+        }
     }
 
     /* ---------------------- SEND MESSAGE ---------------------- */
@@ -96,7 +116,7 @@ const Project = () => {
         }
     };
 
-    /* ---------------------- AI MESSAGE RENDER ---------------------- */
+    /* ---------------------- AI MESSAGE ---------------------- */
     function WriteAiMessage(msg) {
         const obj = JSON.parse(msg);
         return (
@@ -120,19 +140,6 @@ const Project = () => {
         });
 
         axios.get("/users/all").then((res) => setUsers(res.data.users));
-
-        // initialize webcontainer only locally
-        if (!import.meta.env.PROD) {
-            getWebContainer().then(setWebContainer);
-        }
-
-        receiveMessage("project-message", (data) => {
-            setMessages((prev) => [...prev, data]);
-
-            if (!import.meta.env.PROD && data.sender._id === "ai" && data.fileTree) {
-                try { webContainer?.mount(data.fileTree); } catch {}
-            }
-        });
     }, []);
 
     /* ---------------------- SAVE FILE TREE ---------------------- */
@@ -163,7 +170,7 @@ const Project = () => {
                     </button>
                 </header>
 
-                {/* CHAT */}
+                {/* CHAT AREA */}
                 <div className="pt-14 pb-12 flex flex-col flex-grow overflow-hidden">
                     <div
                         ref={messageBox}
@@ -186,7 +193,6 @@ const Project = () => {
                         ))}
                     </div>
 
-                    {/* INPUT */}
                     <div className="absolute bottom-0 left-0 w-full flex bg-white">
                         <input
                             value={message}
@@ -200,7 +206,7 @@ const Project = () => {
                     </div>
                 </div>
 
-                {/* SIDE COLLAB PANEL */}
+                {/* SIDE PANEL */}
                 {isSidePanelOpen && (
                     <div className="absolute inset-0 bg-slate-50 flex flex-col z-20">
                         <header className="flex justify-between p-2 bg-slate-200">
@@ -212,11 +218,24 @@ const Project = () => {
 
                         <div className="flex-1 overflow-y-auto p-2">
                             {project.users?.map((u) => (
-                                <div key={u._id} className="flex items-center gap-2 p-2 bg-slate-100 rounded mb-2">
-                                    <div className="p-3 bg-slate-600 text-white rounded-full">
-                                        <i className="ri-user-fill"></i>
+                                <div
+                                    key={u._id}
+                                    className="flex items-center justify-between gap-2 p-2 bg-slate-100 rounded mb-2"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <div className="p-3 bg-slate-600 text-white rounded-full">
+                                            <i className="ri-user-fill"></i>
+                                        </div>
+                                        <span>{u.email}</span>
                                     </div>
-                                    <span>{u.email}</span>
+
+                                    {/* DELETE ICON */}
+                                    <button
+                                        onClick={() => removeCollaborator(u._id)}
+                                        className="text-red-600 hover:text-red-800 text-xl"
+                                    >
+                                        <i className="ri-delete-bin-line"></i>
+                                    </button>
                                 </div>
                             ))}
                         </div>
@@ -224,10 +243,10 @@ const Project = () => {
                 )}
             </section>
 
-            {/* RIGHT CODE + AI OUTPUT PANEL */}
+            {/* RIGHT CODE PANEL */}
             <section className="right flex-grow h-full flex">
 
-                {/* FILE EXPLORER */}
+                {/* FILE TREE */}
                 <div className="explorer min-w-52 bg-slate-200 overflow-auto">
                     {Object.keys(fileTree).map((file, i) => (
                         <button
@@ -243,10 +262,10 @@ const Project = () => {
                     ))}
                 </div>
 
-                {/* CODE PANEL */}
+                {/* CODE EDITOR */}
                 <div className="code-editor flex flex-col flex-grow overflow-hidden">
 
-                    {/* TABS + RUN BUTTON */}
+                    {/* TABS */}
                     <div className="top flex items-center justify-between bg-white p-2">
                         <div className="files flex">
                             {openFiles.map((f, i) => (
@@ -264,9 +283,7 @@ const Project = () => {
 
                         <button
                             onClick={() =>
-                                alert(
-                                    "⚠️ Vercel does NOT support WebContainer.\nRun works only on localhost."
-                                )
+                                alert("⚠️ Vercel does NOT support WebContainer.\nRun works only locally.")
                             }
                             className="bg-slate-800 text-white px-4 py-1 rounded"
                         >
@@ -305,7 +322,7 @@ const Project = () => {
                 </div>
             </section>
 
-            {/* ADD COLLAB MODAL */}
+            {/* MODAL */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                     <div className="w-96 bg-white rounded-md p-4 flex flex-col max-h-[90vh]">
@@ -317,15 +334,15 @@ const Project = () => {
                             </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto mt-3 pr-2 space-y-2">
+                        <div className="flex-1 overflow-y-auto mt-3 space-y-2 pr-1">
                             {users.map((u) => (
                                 <div
                                     key={u._id}
                                     onClick={() => handleUserClick(u._id)}
-                                    className={`p-2 flex items-center gap-2 rounded cursor-pointer ${
+                                    className={`p-2 flex items-center gap-2 cursor-pointer rounded ${
                                         selectedUserId.has(u._id)
-                                            ? "bg-slate-200"
-                                            : "hover:bg-slate-100"
+                                            ? "bg-slate-300"
+                                            : "hover:bg-slate-200"
                                     }`}
                                 >
                                     <div className="p-3 bg-slate-600 text-white rounded-full">
