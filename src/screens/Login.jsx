@@ -11,23 +11,34 @@ const Login = () => {
 
     const navigate = useNavigate()
 
-    function submitHandler(e) {
+    async function submitHandler(e) {
         e.preventDefault()
 
-        axios.post('/users/login', {
-            email,
-            password
-        })
-            .then((res) => {
-                localStorage.setItem("token", res.data.token);
-                localStorage.setItem("user", JSON.stringify(res.data.user)); // ⭐ store user
+        try {
+            const res = await axios.post('/users/login', { email, password })
 
-                setUser(res.data.user);
-                navigate('/');
-            })
-            .catch((err) => {
-                console.log(err.response.data);
-            });
+            localStorage.setItem("token", res.data.token);
+            localStorage.setItem("user", JSON.stringify(res.data.user));
+
+            setUser(res.data.user)
+            navigate('/')
+
+        } catch (err) {
+            console.log(err.response?.data)
+
+            // ⭐ Handle specific error messages
+            const msg = err.response?.data?.message || "Something went wrong"
+
+            if (msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("no user")) {
+                window.alert("❌ This email is not registered. Please sign up first.")
+            } 
+            else if (msg.toLowerCase().includes("invalid password")) {
+                window.alert("❌ Incorrect password. Please try again.")
+            } 
+            else {
+                window.alert("❌ Login failed! " + msg)
+            }
+        }
     }
 
     return (
@@ -43,6 +54,7 @@ const Login = () => {
                             type="email"
                             className="w-full p-3 rounded bg-gray-700 text-white"
                             placeholder="Enter your email"
+                            required
                         />
                     </div>
 
@@ -53,12 +65,13 @@ const Login = () => {
                             type="password"
                             className="w-full p-3 rounded bg-gray-700 text-white"
                             placeholder="Enter your password"
+                            required
                         />
                     </div>
 
                     <button
                         type="submit"
-                        className="w-full p-3 rounded bg-blue-500 text-white"
+                        className="w-full p-3 rounded bg-blue-500 text-white hover:bg-blue-600"
                     >
                         Login
                     </button>
