@@ -5,6 +5,7 @@ import axios from "../config/axios";
 import { initializeSocket, receiveMessage, sendMessage } from "../config/socket";
 import Markdown from "markdown-to-jsx";
 import hljs from "highlight.js";
+import { getWebContainer } from "../config/webContainer";
 
 function SyntaxHighlightedCode(props) {
     const ref = useRef(null);
@@ -21,22 +22,34 @@ function SyntaxHighlightedCode(props) {
 
 const Project = () => {
     const location = useLocation();
-    const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [selectedUserId, setSelectedUserId] = useState(new Set());
-    const [project, setProject] = useState(location.state.project);
-    const [message, setMessage] = useState("");
     const { user } = useContext(UserContext);
 
-    const messageBox = useRef(null); // SCROLL FIX
+    const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+    const [isModalOpen, setIsModalOpen] = useState(false);
 
+    const [selectedUserId, setSelectedUserId] = useState(new Set());
+    const [project, setProject] = useState(location.state.project);
     const [users, setUsers] = useState([]);
     const [messages, setMessages] = useState(location.state.project.messages || []);
+
+    const [message, setMessage] = useState("");
 
     const [fileTree, setFileTree] = useState({});
     const [currentFile, setCurrentFile] = useState(null);
     const [openFiles, setOpenFiles] = useState([]);
 
+    const [webContainer, setWebContainer] = useState(null);
+
+    const messageBox = useRef(null);
+
+    /* ---------------------- AUTO SCROLL CHAT ----------------------- */
+    useEffect(() => {
+        if (messageBox.current) {
+            messageBox.current.scrollTop = messageBox.current.scrollHeight;
+        }
+    }, [messages]);
+
+    /* ---------------------- HANDLE USER SELECT ---------------------- */
     const handleUserClick = (id) => {
         setSelectedUserId((prev) => {
             const s = new Set(prev);
@@ -45,17 +58,11 @@ const Project = () => {
         });
     };
 
-    // AUTO-SCROLL FIX
-    useEffect(() => {
-        if (messageBox.current) {
-            messageBox.current.scrollTop = messageBox.current.scrollHeight;
-        }
-    }, [messages]);
-
+    /* ---------------------- ADD COLLAB ---------------------- */
     function addCollaborators() {
         axios
             .put("/projects/add-user", {
-                projectId: project._id.toString(),
+                projectId: project._id,
                 users: Array.from(selectedUserId),
             })
             .then((res) => {
@@ -65,6 +72,7 @@ const Project = () => {
             .catch((err) => console.log(err));
     }
 
+    /* ---------------------- SEND MESSAGE ---------------------- */
     const send = async () => {
         const text = message.trim();
         if (!text) return;
@@ -81,15 +89,16 @@ const Project = () => {
 
             setMessages((prev) => [...prev, savedMessage]);
             sendMessage("project-message", savedMessage);
-            setMessage("");
 
+            setMessage("");
         } catch (err) {
-            console.log("Message error:", err);
+            console.log(err);
         }
     };
 
-    function WriteAiMessage(messageStr) {
-        const obj = JSON.parse(messageStr);
+    /* ---------------------- AI MESSAGE RENDER ---------------------- */
+    function WriteAiMessage(msg) {
+        const obj = JSON.parse(msg);
         return (
             <div className="overflow-auto bg-slate-900 text-white rounded p-2">
                 <Markdown children={obj.text} />
@@ -97,6 +106,7 @@ const Project = () => {
         );
     }
 
+    /* ---------------------- INITIAL LOAD ---------------------- */
     useEffect(() => {
         initializeSocket(project._id);
 
@@ -110,10 +120,31 @@ const Project = () => {
         });
 
         axios.get("/users/all").then((res) => setUsers(res.data.users));
+
+        // initialize webcontainer only locally
+        if (!import.meta.env.PROD) {
+            getWebContainer().then(setWebContainer);
+        }
+
+        receiveMessage("project-message", (data) => {
+            setMessages((prev) => [...prev, data]);
+
+            if (!import.meta.env.PROD && data.sender._id === "ai" && data.fileTree) {
+                try { webContainer?.mount(data.fileTree); } catch {}
+            }
+        });
     }, []);
 
+    /* ---------------------- SAVE FILE TREE ---------------------- */
+    function saveFileTree(ft) {
+        axios.put("/projects/update-file-tree", {
+            projectId: project._id,
+            fileTree: ft,
+        });
+    }
+
     return (
-        <main className="h-screen w-screen flex">
+        <main className="h-screen w-screen flex overflow-hidden">
 
             {/* LEFT CHAT PANEL */}
             <section className="left flex flex-col h-full min-w-96 bg-slate-300 relative">
@@ -132,12 +163,11 @@ const Project = () => {
                     </button>
                 </header>
 
-                {/* CHAT AREA (SCROLL FIX) */}
+                {/* CHAT */}
                 <div className="pt-14 pb-12 flex flex-col flex-grow overflow-hidden">
                     <div
                         ref={messageBox}
                         className="flex-grow p-2 flex flex-col gap-2 overflow-y-auto"
-                        style={{ maxHeight: "100%" }} // IMPORTANT FIX
                     >
                         {messages.map((msg, i) => (
                             <div
@@ -161,19 +191,18 @@ const Project = () => {
                         <input
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
-                            placeholder="Enter message..."
                             className="flex-grow p-2 px-3 outline-none"
+                            placeholder="Enter message..."
                         />
-                        <button onClick={send} className="bg-slate-900 text-white px-4">
+                        <button onClick={send} className="bg-slate-900 text-white px-5">
                             <i className="ri-send-plane-fill"></i>
                         </button>
                     </div>
                 </div>
 
-                {/* COLLABORATORS PANEL */}
+                {/* SIDE COLLAB PANEL */}
                 {isSidePanelOpen && (
-                    <div className="absolute inset-0 bg-slate-50 flex flex-col z-10">
-
+                    <div className="absolute inset-0 bg-slate-50 flex flex-col z-20">
                         <header className="flex justify-between p-2 bg-slate-200">
                             <h2 className="font-semibold">Collaborators</h2>
                             <button onClick={() => setIsSidePanelOpen(false)}>
@@ -181,7 +210,6 @@ const Project = () => {
                             </button>
                         </header>
 
-                        {/* Scroll only list, not whole page */}
                         <div className="flex-1 overflow-y-auto p-2">
                             {project.users?.map((u) => (
                                 <div key={u._id} className="flex items-center gap-2 p-2 bg-slate-100 rounded mb-2">
@@ -196,15 +224,92 @@ const Project = () => {
                 )}
             </section>
 
-            {/* RIGHT CODE AREA (unchanged) */}
-            <section className="right flex-grow bg-red-50"></section>
+            {/* RIGHT CODE + AI OUTPUT PANEL */}
+            <section className="right flex-grow h-full flex">
 
-            {/* ADD COLLABORATOR MODAL */}
+                {/* FILE EXPLORER */}
+                <div className="explorer min-w-52 bg-slate-200 overflow-auto">
+                    {Object.keys(fileTree).map((file, i) => (
+                        <button
+                            key={i}
+                            onClick={() => {
+                                setCurrentFile(file);
+                                setOpenFiles((prev) => [...new Set([...prev, file])]);
+                            }}
+                            className="p-2 px-4 bg-slate-300 w-full text-left border-b"
+                        >
+                            {file}
+                        </button>
+                    ))}
+                </div>
+
+                {/* CODE PANEL */}
+                <div className="code-editor flex flex-col flex-grow overflow-hidden">
+
+                    {/* TABS + RUN BUTTON */}
+                    <div className="top flex items-center justify-between bg-white p-2">
+                        <div className="files flex">
+                            {openFiles.map((f, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentFile(f)}
+                                    className={`px-4 py-2 border ${
+                                        currentFile === f ? "bg-slate-400" : "bg-slate-200"
+                                    }`}
+                                >
+                                    {f}
+                                </button>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={() =>
+                                alert(
+                                    "⚠️ Vercel does NOT support WebContainer.\nRun works only on localhost."
+                                )
+                            }
+                            className="bg-slate-800 text-white px-4 py-1 rounded"
+                        >
+                            Run
+                        </button>
+                    </div>
+
+                    {/* EDITOR */}
+                    <div className="bottom flex flex-grow overflow-auto">
+                        {fileTree[currentFile] && (
+                            <div className="flex-grow bg-white p-3">
+                                <pre>
+                                    <code
+                                        contentEditable
+                                        suppressContentEditableWarning
+                                        onBlur={(e) => {
+                                            const updated = e.target.innerText;
+                                            const ft = {
+                                                ...fileTree,
+                                                [currentFile]: { file: { contents: updated } },
+                                            };
+                                            setFileTree(ft);
+                                            saveFileTree(ft);
+                                        }}
+                                        dangerouslySetInnerHTML={{
+                                            __html: hljs.highlight(
+                                                "javascript",
+                                                fileTree[currentFile].file.contents
+                                            ).value,
+                                        }}
+                                    />
+                                </pre>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </section>
+
+            {/* ADD COLLAB MODAL */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                     <div className="w-96 bg-white rounded-md p-4 flex flex-col max-h-[90vh]">
 
-                        {/* MODAL HEADER */}
                         <div className="flex justify-between items-center border-b pb-2">
                             <h2 className="text-xl font-semibold">Select User</h2>
                             <button onClick={() => setIsModalOpen(false)}>
@@ -212,8 +317,7 @@ const Project = () => {
                             </button>
                         </div>
 
-                        {/* ONLY LIST SCROLLS */}
-                        <div className="flex-1 overflow-y-auto mt-3 space-y-2 pr-1">
+                        <div className="flex-1 overflow-y-auto mt-3 pr-2 space-y-2">
                             {users.map((u) => (
                                 <div
                                     key={u._id}
@@ -232,10 +336,9 @@ const Project = () => {
                             ))}
                         </div>
 
-                        {/* BUTTON AT BOTTOM */}
                         <button
                             onClick={addCollaborators}
-                            className="mt-3 w-full py-2 bg-blue-600 text-white rounded"
+                            className="mt-3 w-full bg-blue-600 text-white py-2 rounded"
                         >
                             Add Collaborators
                         </button>
