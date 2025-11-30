@@ -34,8 +34,12 @@ export const sendMessage = (event, data) => {
   if (socketInstance) socketInstance.emit(event, data);
 };
 
+// ⭐ FIX: Remove previous listener before adding new one
 export const receiveMessage = (event, cb) => {
-  if (socketInstance) socketInstance.on(event, cb);
+  if (!socketInstance) return;
+
+  socketInstance.off(event);   // <-- remove old listener
+  socketInstance.on(event, cb); // <-- add new one
 };
 
 export const getSocket = () => socketInstance;
