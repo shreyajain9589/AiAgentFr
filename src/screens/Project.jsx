@@ -6,6 +6,7 @@ import { initializeSocket, receiveMessage, sendMessage } from "../config/socket"
 import Markdown from "markdown-to-jsx";
 import hljs from "highlight.js";
 
+/* ---------------------- HIGHLIGHT CODE ---------------------- */
 function SyntaxHighlightedCode(props) {
     const ref = useRef(null);
 
@@ -29,8 +30,8 @@ const Project = () => {
     const [selectedUserId, setSelectedUserId] = useState(new Set());
     const [project, setProject] = useState(location.state.project);
     const [users, setUsers] = useState([]);
-    const [messages, setMessages] = useState(location.state.project.messages || []);
 
+    const [messages, setMessages] = useState(location.state.project.messages || []);
     const [message, setMessage] = useState("");
 
     const [fileTree, setFileTree] = useState({});
@@ -65,7 +66,7 @@ const Project = () => {
 
             setIsModalOpen(false);
 
-            // re-fetch updated project with emails populated
+            // re-fetch project for updated list
             const res = await axios.get(`/projects/get-project/${project._id}`);
             setProject(res.data.project);
 
@@ -129,7 +130,6 @@ const Project = () => {
     useEffect(() => {
         initializeSocket(project._id);
 
-        // Load project + users + messages
         axios.get(`/projects/get-project/${project._id}`).then((res) => {
             setProject(res.data.project);
             setFileTree(res.data.project.fileTree || {});
@@ -141,11 +141,28 @@ const Project = () => {
 
         axios.get("/users/all").then((res) => setUsers(res.data.users));
 
-        /* ---------------------- FIX DUPLICATE MESSAGES ---------------------- */
+        /* ---------------------- PROPER SOCKET LISTENER ---------------------- */
         receiveMessage("project-message", (data) => {
-            if (data.sender._id === user._id) return; // prevent duplicate
+            // Prevent duplicate display of own message
+            if (data.sender._id === user._id) return;
 
             setMessages((prev) => [...prev, data]);
+
+            /* --------- FILE TREE UPDATE FROM AI --------- */
+            if (data.sender._id === "ai" && data.fileTree) {
+                const newTree = data.fileTree;
+
+                // Merge old + new fileTree
+                const updatedTree = { ...fileTree, ...newTree };
+                setFileTree(updatedTree);
+
+                // Auto-open first new file
+                const newFiles = Object.keys(newTree);
+                if (newFiles.length > 0) {
+                    setOpenFiles((prev) => [...new Set([...prev, newFiles[0]])]);
+                    setCurrentFile(newFiles[0]);
+                }
+            }
         });
     }, []);
 
@@ -237,7 +254,6 @@ const Project = () => {
                                         <span>{u.email}</span>
                                     </div>
 
-                                    {/* DELETE */}
                                     <button
                                         onClick={() => removeCollaborator(u._id)}
                                         className="text-red-600 hover:text-red-800 text-xl"
@@ -251,7 +267,7 @@ const Project = () => {
                 )}
             </section>
 
-            {/* RIGHT PANEL */}
+            {/* RIGHT SIDE */}
             <section className="right flex-grow h-full flex">
 
                 <div className="explorer min-w-52 bg-slate-200 overflow-auto">
