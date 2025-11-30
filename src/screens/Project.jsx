@@ -1,100 +1,98 @@
-import React, { useState, useEffect, useContext, useRef } from 'react'
-import { UserContext } from '../context/user.context'
-import { useLocation } from 'react-router-dom'
-import axios from '../config/axios'
-import { initializeSocket, receiveMessage, sendMessage } from '../config/socket'
-import Markdown from 'markdown-to-jsx'
-import hljs from 'highlight.js';
-import { getWebContainer } from '../config/webContainer'
+import React, { useState, useEffect, useContext, useRef } from "react";
+import { UserContext } from "../context/user.context";
+import { useLocation } from "react-router-dom";
+import axios from "../config/axios";
+import { initializeSocket, receiveMessage, sendMessage } from "../config/socket";
+import Markdown from "markdown-to-jsx";
+import hljs from "highlight.js";
+import { getWebContainer } from "../config/webContainer";
 
 function SyntaxHighlightedCode(props) {
-    const ref = useRef(null)
+    const ref = useRef(null);
 
     React.useEffect(() => {
-        if (ref.current && props.className?.includes('lang-') && window.hljs) {
-            window.hljs.highlightElement(ref.current)
-            ref.current.removeAttribute('data-highlighted')
+        if (ref.current && props.className?.includes("lang-") && window.hljs) {
+            window.hljs.highlightElement(ref.current);
+            ref.current.removeAttribute("data-highlighted");
         }
-    }, [props.className, props.children])
+    }, [props.className, props.children]);
 
-    return <code {...props} ref={ref} />
+    return <code {...props} ref={ref} />;
 }
 
 const Project = () => {
-    const location = useLocation()
-    const [isSidePanelOpen, setIsSidePanelOpen] = useState(false)
-    const [isModalOpen, setIsModalOpen] = useState(false)
-    const [selectedUserId, setSelectedUserId] = useState(new Set())
-    const [project, setProject] = useState(location.state.project)
-    const [message, setMessage] = useState('')
-    const { user } = useContext(UserContext)
-    const messageBox = useRef(null)
+    const location = useLocation();
+    const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedUserId, setSelectedUserId] = useState(new Set());
+    const [project, setProject] = useState(location.state.project);
+    const [message, setMessage] = useState("");
+    const { user } = useContext(UserContext);
+    const messageBox = useRef(null);
 
-    const [users, setUsers] = useState([])
-    const [messages, setMessages] = useState(location.state.project.messages || [])
-    const [fileTree, setFileTree] = useState({})
-    const [currentFile, setCurrentFile] = useState(null)
-    const [openFiles, setOpenFiles] = useState([])
+    const [users, setUsers] = useState([]);
+    const [messages, setMessages] = useState(location.state.project.messages || []);
+    const [fileTree, setFileTree] = useState({});
+    const [currentFile, setCurrentFile] = useState(null);
+    const [openFiles, setOpenFiles] = useState([]);
 
-    const [webContainer, setWebContainer] = useState(null)
-    const [iframeUrl, setIframeUrl] = useState(null)
-    const [runProcess, setRunProcess] = useState(null)
+    const [webContainer, setWebContainer] = useState(null);
+    const [iframeUrl, setIframeUrl] = useState(null);
+    const [runProcess, setRunProcess] = useState(null);
 
     const handleUserClick = (id) => {
-        setSelectedUserId(prev => {
-            const newSet = new Set(prev)
-            if (newSet.has(id)) newSet.delete(id)
-            else newSet.add(id)
-            return newSet
-        })
-    }
+        setSelectedUserId((prev) => {
+            const newSet = new Set(prev);
+            if (newSet.has(id)) newSet.delete(id);
+            else newSet.add(id);
+            return newSet;
+        });
+    };
 
-    // Auto-scroll to bottom
     useEffect(() => {
         if (messageBox.current) {
-            messageBox.current.scrollTop = messageBox.current.scrollHeight
+            messageBox.current.scrollTop = messageBox.current.scrollHeight;
         }
-    }, [messages])
+    }, [messages]);
 
-    // Add collaborator
     function addCollaborators() {
-        axios.put("/projects/add-user", {
-            projectId: project._id.toString(),
-            users: Array.from(selectedUserId)
-        }).then(res => {
-            setProject(res.data.project)
-            setIsModalOpen(false)
-        }).catch(err => console.log(err))
+        axios
+            .put("/projects/add-user", {
+                projectId: project._id.toString(),
+                users: Array.from(selectedUserId),
+            })
+            .then((res) => {
+                setProject(res.data.project);
+                setIsModalOpen(false);
+            })
+            .catch((err) => console.log(err));
     }
 
-    // Send message
     const send = async () => {
-        const text = message.trim()
-        if (!text) return
+        const text = message.trim();
+        if (!text) return;
 
         const payload = {
             projectId: project._id,
             sender: { _id: user._id, email: user.email },
-            message: text
-        }
+            message: text,
+        };
 
         try {
-            // Save to DB
-            const res = await axios.post("/projects/message", payload)
-            const savedMessage = res.data.message
+            const res = await axios.post("/projects/message", payload);
+            const savedMessage = res.data.message;
 
-            setMessages(prev => [...prev, savedMessage])
+            setMessages((prev) => [...prev, savedMessage]);
 
-            // Send socket event
-            sendMessage("project-message", savedMessage)
-            setMessage("")
+            sendMessage("project-message", savedMessage);
+            setMessage("");
         } catch (err) {
-            console.log("Message error:", err)
+            console.log("Message error:", err);
         }
-    }
+    };
 
     function WriteAiMessage(messageStr) {
-        const obj = JSON.parse(messageStr)
+        const obj = JSON.parse(messageStr);
         return (
             <div className="overflow-auto bg-slate-950 text-white rounded-sm p-2">
                 <Markdown
@@ -102,68 +100,79 @@ const Project = () => {
                     options={{ overrides: { code: SyntaxHighlightedCode } }}
                 />
             </div>
-        )
+        );
     }
 
     useEffect(() => {
-        initializeSocket(project._id)
+        initializeSocket(project._id);
 
-        // WebContainer only works in DEV
         if (!import.meta.env.PROD) {
-            getWebContainer().then(container => {
-                setWebContainer(container)
-            })
+            getWebContainer().then((container) => {
+                setWebContainer(container);
+            });
         }
 
         receiveMessage("project-message", (data) => {
-            setMessages(prev => [...prev, data])
+            setMessages((prev) => [...prev, data]);
 
             if (!import.meta.env.PROD && data.sender._id === "ai" && data.fileTree) {
-                try { webContainer?.mount(data.fileTree) } catch { }
+                try {
+                    webContainer?.mount(data.fileTree);
+                } catch {}
             }
-        })
+        });
 
-        axios.get(`/projects/get-project/${project._id}`).then(res => {
-            setProject(res.data.project)
-            setFileTree(res.data.project.fileTree || {})
-        })
+        axios.get(`/projects/get-project/${project._id}`).then((res) => {
+            setProject(res.data.project);
+            setFileTree(res.data.project.fileTree || {});
+        });
 
-        axios.get(`/projects/messages/${project._id}`).then(res => {
-            setMessages(res.data.messages)
-        })
+        axios.get(`/projects/messages/${project._id}`).then((res) => {
+            setMessages(res.data.messages);
+        });
 
-        axios.get("/users/all").then(res => setUsers(res.data.users))
-    }, [])
+        axios.get("/users/all").then((res) => setUsers(res.data.users));
+    }, []);
 
     function saveFileTree(ft) {
         axios.put("/projects/update-file-tree", {
             projectId: project._id,
-            fileTree: ft
-        })
+            fileTree: ft,
+        });
     }
 
     return (
-        <main className='h-screen w-screen flex'>
-            
+        <main className="h-screen w-screen flex">
             {/* LEFT CHAT PANEL */}
             <section className="left relative flex flex-col h-screen min-w-96 bg-slate-300">
                 <header className="flex justify-between items-center p-2 px-4 w-full bg-slate-100 absolute z-10 top-0">
-                    <button className="flex gap-2" onClick={() => setIsModalOpen(true)}>
-                        <i className="ri-add-fill mr-1"></i> Add collaborator
+                    <button
+                        className="flex gap-2 items-center bg-slate-800 text-white px-3 py-1 rounded hover:bg-slate-900"
+                        onClick={() => setIsModalOpen(true)}
+                    >
+                        <i className="ri-add-fill text-lg"></i> <span>Add collaborator</span>
                     </button>
 
-                    <button onClick={() => setIsSidePanelOpen(!isSidePanelOpen)} className="p-2">
+                    <button
+                        onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
+                        className="p-2"
+                    >
                         <i className="ri-group-fill"></i>
                     </button>
                 </header>
 
                 <div className="conversation-area pt-14 pb-10 flex-grow flex flex-col relative">
-                    <div ref={messageBox} className="message-box p-1 flex-grow flex flex-col gap-1 overflow-auto">
+                    <div
+                        ref={messageBox}
+                        className="message-box p-1 flex-grow flex flex-col gap-1 overflow-auto"
+                    >
                         {messages.map((msg, i) => (
-                            <div key={msg._id || i}
+                            <div
+                                key={msg._id || i}
                                 className={`${msg.sender._id === "ai" ? "max-w-80" : "max-w-52"} 
-                                    ${msg.sender._id === user._id ? "ml-auto" : ""} 
-                                    message p-2 bg-slate-50 rounded-md`}>
+                                ${msg.sender._id === user._id ? "ml-auto" : ""} 
+                                message p-2 bg-slate-50 rounded-md`}
+                            >
                                 <small className="text-xs opacity-70">{msg.sender.email}</small>
                                 <div className="text-sm">
                                     {msg.sender._id === "ai"
@@ -177,7 +186,7 @@ const Project = () => {
                     <div className="inputField w-full flex absolute bottom-0">
                         <input
                             value={message}
-                            onChange={e => setMessage(e.target.value)}
+                            onChange={(e) => setMessage(e.target.value)}
                             className="p-2 px-4 flex-grow bg-white"
                             placeholder="Enter message..."
                         />
@@ -187,60 +196,77 @@ const Project = () => {
                     </div>
                 </div>
 
-                {/* SIDE Collaborators Panel */}
-                <div className={`sidePanel absolute top-0 h-full w-full bg-slate-50 transition-all 
-                    ${isSidePanelOpen ? "translate-x-0" : "-translate-x-full"}`}>
-                    <header className='flex justify-between p-2 bg-slate-200'>
-                        <h1 className='font-semibold'>Collaborators</h1>
-                        <button onClick={() => setIsSidePanelOpen(false)}><i className="ri-close-fill"></i></button>
+                {/* SIDE COLLABORATOR PANEL */}
+                <div
+                    className={`sidePanel absolute top-0 h-full w-full bg-slate-50 transition-all 
+                    ${isSidePanelOpen ? "translate-x-0" : "-translate-x-full"}`}
+                >
+                    <header className="flex justify-between p-2 bg-slate-200">
+                        <h1 className="font-semibold">Collaborators</h1>
+                        <button onClick={() => setIsSidePanelOpen(false)}>
+                            <i className="ri-close-fill"></i>
+                        </button>
                     </header>
 
-                    <div className="users flex flex-col gap-2 p-2">
-                        {project.users?.map(u => (
-                            <div key={u._id} className="p-2 flex gap-2 items-center bg-slate-100 rounded">
+                    <div className="users flex flex-col gap-2 p-2 overflow-y-auto h-full">
+                        {project.users?.map((u) => (
+                            <div
+                                key={u._id || Math.random()}
+                                className="p-2 flex gap-2 items-center bg-slate-100 rounded"
+                            >
                                 <div className="rounded-full bg-slate-600 text-white p-3">
                                     <i className="ri-user-fill"></i>
                                 </div>
-                                <h1>{u.email}</h1>
+                                <h1>{u.email || "Unknown User"}</h1>
                             </div>
                         ))}
                     </div>
                 </div>
             </section>
 
-            {/* RIGHT CODE PANEL */}
+            {/* RIGHT PANEL */}
             <section className="right bg-red-50 flex-grow h-full flex">
-                
-                {/* File Explorer */}
                 <div className="explorer min-w-52 bg-slate-200">
                     <div className="file-tree">
                         {Object.keys(fileTree).map((file, i) => (
-                            <button key={i}
-                                onClick={() => { setCurrentFile(file); setOpenFiles(prev => [...new Set([...prev, file])]) }}
-                                className="p-2 px-4 bg-slate-300 w-full text-left">
+                            <button
+                                key={i}
+                                onClick={() => {
+                                    setCurrentFile(file);
+                                    setOpenFiles((prev) => [...new Set([...prev, file])]);
+                                }}
+                                className="p-2 px-4 bg-slate-300 w-full text-left"
+                            >
                                 {file}
                             </button>
                         ))}
                     </div>
                 </div>
 
-                {/* Editor */}
                 <div className="code-editor flex flex-col flex-grow">
                     <div className="top flex justify-between items-center bg-white p-2">
-
                         <div className="files flex">
                             {openFiles.map((f, i) => (
-                                <button key={i}
+                                <button
+                                    key={i}
                                     onClick={() => setCurrentFile(f)}
-                                    className={`p-2 px-4 ${currentFile === f ? "bg-slate-400" : "bg-slate-300"}`}>
+                                    className={`p-2 px-4 ${
+                                        currentFile === f ? "bg-slate-400" : "bg-slate-300"
+                                    }`}
+                                >
                                     {f}
                                 </button>
                             ))}
                         </div>
 
                         <button
-                            onClick={() => alert("Vercel does NOT support WebContainer.\nRun works only on localhost.")}
-                            className="bg-slate-700 text-white px-4 py-2 rounded">
+                            onClick={() =>
+                                alert(
+                                    "⚠️ Vercel does NOT support WebContainer. Run works only on localhost."
+                                )
+                            }
+                            className="bg-slate-700 text-white px-4 py-2 rounded"
+                        >
                             Run
                         </button>
                     </div>
@@ -253,19 +279,19 @@ const Project = () => {
                                         contentEditable
                                         suppressContentEditableWarning
                                         onBlur={(e) => {
-                                            const updated = e.target.innerText
+                                            const updated = e.target.innerText;
                                             const ft = {
                                                 ...fileTree,
-                                                [currentFile]: { file: { contents: updated } }
-                                            }
-                                            setFileTree(ft)
-                                            saveFileTree(ft)
+                                                [currentFile]: { file: { contents: updated } },
+                                            };
+                                            setFileTree(ft);
+                                            saveFileTree(ft);
                                         }}
                                         dangerouslySetInnerHTML={{
                                             __html: hljs.highlight(
                                                 "javascript",
                                                 fileTree[currentFile].file.contents
-                                            ).value
+                                            ).value,
                                         }}
                                     />
                                 </pre>
@@ -275,24 +301,30 @@ const Project = () => {
                 </div>
             </section>
 
-            {/* Add Collaborator Modal */}
+            {/* ADD COLLABORATOR MODAL */}
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                    <div className="bg-white p-4 rounded-md w-96 relative">
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white p-4 rounded-md w-96 relative max-h-[90vh] flex flex-col">
 
-                        <header className='flex justify-between'>
-                            <h2 className='text-xl font-semibold'>Select User</h2>
+                        <header className="flex justify-between items-center border-b pb-2">
+                            <h2 className="text-xl font-semibold">Select User</h2>
                             <button onClick={() => setIsModalOpen(false)}>
-                                <i className="ri-close-fill"></i>
+                                <i className="ri-close-fill text-xl"></i>
                             </button>
                         </header>
 
-                        <div className="users-list max-h-96 overflow-auto mt-4">
-                            {users.map(u => (
-                                <div key={u._id}
+                        <div className="users-list flex-1 overflow-y-auto mt-3 pr-2">
+                            {users.map((u) => (
+                                <div
+                                    key={u._id}
                                     onClick={() => handleUserClick(u._id)}
-                                    className={`p-2 flex gap-2 items-center cursor-pointer
-                                    ${selectedUserId.has(u._id) ? 'bg-slate-200' : ''}`}>
+                                    className={`p-2 flex gap-2 items-center cursor-pointer rounded-md 
+                                    ${
+                                        selectedUserId.has(u._id)
+                                            ? "bg-slate-200"
+                                            : "bg-white hover:bg-slate-100"
+                                    }`}
+                                >
                                     <div className="p-4 rounded-full bg-slate-600 text-white">
                                         <i className="ri-user-fill"></i>
                                     </div>
@@ -301,16 +333,19 @@ const Project = () => {
                             ))}
                         </div>
 
-                        <button
-                            onClick={addCollaborators}
-                            className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded">
-                            Add Collaborators
-                        </button>
+                        <div className="mt-4">
+                            <button
+                                onClick={addCollaborators}
+                                className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700"
+                            >
+                                Add Collaborators
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
         </main>
-    )
-}
+    );
+};
 
-export default Project
+export default Project;
