@@ -3,14 +3,14 @@ import { io } from 'socket.io-client';
 let socketInstance = null;
 
 export const initializeSocket = (projectId) => {
-    socketInstance = io('http://localhost:5000', { // <- make sure port 5000
+    socketInstance = io(import.meta.env.VITE_SOCKET_URL, {
         auth: {
             token: localStorage.getItem('token')
         },
         query: {
             projectId
         },
-        transports: ['websocket', 'polling'] // make polling fallback
+        transports: ['websocket', 'polling']
     });
 
     socketInstance.on('connect_error', (err) => {
