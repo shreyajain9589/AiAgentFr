@@ -6,7 +6,7 @@ import { initializeSocket, receiveMessage, sendMessage } from "../config/socket"
 import Markdown from "markdown-to-jsx";
 import hljs from "highlight.js";
 
-/* ---------------------- HIGHLIGHT CODE ---------------------- */
+/* ---------------------- CODE HIGHLIGHT ---------------------- */
 function SyntaxHighlightedCode(props) {
     const ref = useRef(null);
 
@@ -24,19 +24,26 @@ const Project = () => {
     const location = useLocation();
     const { user } = useContext(UserContext);
 
+    const initialProject = location.state?.project || {};
+
+    if (!initialProject._id) {
+        return <div className="p-5">Invalid project. Please go back.</div>;
+    }
+
+    const [project, setProject] = useState(initialProject);
+    const [users, setUsers] = useState([]);
+
+    const [messages, setMessages] = useState(initialProject.messages || []);
+    const [message, setMessage] = useState("");
+
+    const [fileTree, setFileTree] = useState(initialProject.fileTree || {});
+    const [currentFile, setCurrentFile] = useState(null);
+    const [openFiles, setOpenFiles] = useState([]);
+
     const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     const [selectedUserId, setSelectedUserId] = useState(new Set());
-    const [project, setProject] = useState(location.state.project);
-    const [users, setUsers] = useState([]);
-
-    const [messages, setMessages] = useState(location.state.project.messages || []);
-    const [message, setMessage] = useState("");
-
-    const [fileTree, setFileTree] = useState({});
-    const [currentFile, setCurrentFile] = useState(null);
-    const [openFiles, setOpenFiles] = useState([]);
 
     const messageBox = useRef(null);
 
@@ -47,14 +54,48 @@ const Project = () => {
         }
     }, [messages]);
 
-    /* ---------------------- SELECT USERS ---------------------- */
-    const handleUserClick = (id) => {
-        setSelectedUserId((prev) => {
-            const s = new Set(prev);
-            s.has(id) ? s.delete(id) : s.add(id);
-            return s;
+    /* ---------------------- INITIAL LOAD ---------------------- */
+    useEffect(() => {
+        initializeSocket(project._id);
+
+        axios.get(`/projects/get-project/${project._id}`).then((res) => {
+            setProject(res.data.project);
+            setFileTree(res.data.project.fileTree || {});
         });
-    };
+
+        axios.get(`/projects/messages/${project._id}`).then((res) => {
+            setMessages(res.data.messages);
+        });
+
+        axios.get("/users/all").then((res) => setUsers(res.data.users));
+
+        /* ---------------------- SOCKET LISTENER ---------------------- */
+        receiveMessage("project-message", (data) => {
+            if (data.sender._id === user._id) return; // ignore own message
+
+            setMessages((prev) => [...prev, data]);
+
+            // ⭐ AI returned new file tree
+            if (data.sender._id === "ai") {
+                try {
+                    const parsed = JSON.parse(data.message);
+
+                    if (parsed.fileTree) {
+                        const newTree = parsed.fileTree;
+                        const updatedTree = { ...fileTree, ...newTree };
+
+                        setFileTree(updatedTree);
+
+                        const newFiles = Object.keys(newTree);
+                        if (newFiles.length > 0) {
+                            setOpenFiles((prev) => [...new Set([...prev, newFiles[0]])]);
+                            setCurrentFile(newFiles[0]);
+                        }
+                    }
+                } catch (err) {}
+            }
+        });
+    }, []);
 
     /* ---------------------- ADD COLLAB ---------------------- */
     async function addCollaborators() {
@@ -64,12 +105,10 @@ const Project = () => {
                 users: Array.from(selectedUserId),
             });
 
-            setIsModalOpen(false);
-
-            // re-fetch project for updated list
             const res = await axios.get(`/projects/get-project/${project._id}`);
             setProject(res.data.project);
 
+            setIsModalOpen(false);
             setSelectedUserId(new Set());
         } catch (err) {
             console.log(err);
@@ -116,7 +155,7 @@ const Project = () => {
         }
     };
 
-    /* ---------------------- AI MESSAGE ---------------------- */
+    /* ---------------------- AI MESSAGE RENDER ---------------------- */
     function WriteAiMessage(msg) {
         const obj = JSON.parse(msg);
         return (
@@ -125,46 +164,6 @@ const Project = () => {
             </div>
         );
     }
-
-    /* ---------------------- INITIAL LOAD ---------------------- */
-    useEffect(() => {
-        initializeSocket(project._id);
-
-        axios.get(`/projects/get-project/${project._id}`).then((res) => {
-            setProject(res.data.project);
-            setFileTree(res.data.project.fileTree || {});
-        });
-
-        axios.get(`/projects/messages/${project._id}`).then((res) => {
-            setMessages(res.data.messages);
-        });
-
-        axios.get("/users/all").then((res) => setUsers(res.data.users));
-
-        /* ---------------------- PROPER SOCKET LISTENER ---------------------- */
-        receiveMessage("project-message", (data) => {
-            // Prevent duplicate display of own message
-            if (data.sender._id === user._id) return;
-
-            setMessages((prev) => [...prev, data]);
-
-            /* --------- FILE TREE UPDATE FROM AI --------- */
-            if (data.sender._id === "ai" && data.fileTree) {
-                const newTree = data.fileTree;
-
-                // Merge old + new fileTree
-                const updatedTree = { ...fileTree, ...newTree };
-                setFileTree(updatedTree);
-
-                // Auto-open first new file
-                const newFiles = Object.keys(newTree);
-                if (newFiles.length > 0) {
-                    setOpenFiles((prev) => [...new Set([...prev, newFiles[0]])]);
-                    setCurrentFile(newFiles[0]);
-                }
-            }
-        });
-    }, []);
 
     /* ---------------------- SAVE FILE TREE ---------------------- */
     function saveFileTree(ft) {
@@ -180,7 +179,6 @@ const Project = () => {
             {/* LEFT CHAT PANEL */}
             <section className="left flex flex-col h-full min-w-96 bg-slate-300 relative">
 
-                {/* HEADER */}
                 <header className="flex justify-between items-center p-2 px-4 bg-slate-100">
                     <button
                         onClick={() => setIsModalOpen(true)}
@@ -194,12 +192,8 @@ const Project = () => {
                     </button>
                 </header>
 
-                {/* CHAT */}
                 <div className="pt-14 pb-12 flex flex-col flex-grow overflow-hidden">
-                    <div
-                        ref={messageBox}
-                        className="flex-grow p-2 flex flex-col gap-2 overflow-y-auto"
-                    >
+                    <div ref={messageBox} className="flex-grow p-2 flex flex-col gap-2 overflow-y-auto">
                         {messages.map((msg, i) => (
                             <div
                                 key={msg._id || i}
@@ -217,7 +211,6 @@ const Project = () => {
                         ))}
                     </div>
 
-                    {/* INPUT */}
                     <div className="absolute bottom-0 left-0 w-full flex bg-white">
                         <input
                             value={message}
@@ -267,7 +260,7 @@ const Project = () => {
                 )}
             </section>
 
-            {/* RIGHT SIDE */}
+            {/* RIGHT PANEL */}
             <section className="right flex-grow h-full flex">
 
                 <div className="explorer min-w-52 bg-slate-200 overflow-auto">
@@ -303,9 +296,7 @@ const Project = () => {
                         </div>
 
                         <button
-                            onClick={() =>
-                                alert("⚠️ Vercel does NOT support WebContainer.\nRun works only locally.")
-                            }
+                            onClick={() => alert("⚠️ Vercel does NOT support WebContainer.\nRun works only locally.")}
                             className="bg-slate-800 text-white px-4 py-1 rounded"
                         >
                             Run
@@ -358,7 +349,11 @@ const Project = () => {
                             {users.map((u) => (
                                 <div
                                     key={u._id}
-                                    onClick={() => handleUserClick(u._id)}
+                                    onClick={() => setSelectedUserId(prev => {
+                                        const s = new Set(prev);
+                                        s.has(u._id) ? s.delete(u._id) : s.add(u._id);
+                                        return s;
+                                    })}
                                     className={`p-2 flex items-center gap-2 cursor-pointer rounded ${
                                         selectedUserId.has(u._id)
                                             ? "bg-slate-300"
