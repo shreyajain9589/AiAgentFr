@@ -21,16 +21,14 @@ function SyntaxHighlightedCode(props) {
 }
 
 const Project = () => {
-
     const location = useLocation()
-
     const [isSidePanelOpen, setIsSidePanelOpen] = useState(false)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [selectedUserId, setSelectedUserId] = useState(new Set())
     const [project, setProject] = useState(location.state.project)
     const [message, setMessage] = useState('')
     const { user } = useContext(UserContext)
-    const messageBox = React.createRef()
+    const messageBox = useRef(null)
 
     const [users, setUsers] = useState([])
     const [messages, setMessages] = useState([])
@@ -51,9 +49,16 @@ const Project = () => {
         })
     }
 
+    // Scroll to bottom on messages change
+    useEffect(() => {
+        if (messageBox.current) {
+            messageBox.current.scrollTop = messageBox.current.scrollHeight
+        }
+    }, [messages])
+
     function addCollaborators() {
         axios.put("/projects/add-user", {
-            projectId: location.state.project._id.toString(),
+            projectId: project._id.toString(),
             users: Array.from(selectedUserId)
         }).then(res => {
             console.log(res.data)
@@ -61,19 +66,36 @@ const Project = () => {
         }).catch(err => console.log(err))
     }
 
-    const send = () => {
-        sendMessage('project-message', {
-            message,
-            sender: user
-        })
-        setMessages(prev => [...prev, { sender: user, message }])
-        setMessage("")
+    // Send: save to backend then emit socket
+    const send = async () => {
+        const text = message?.trim()
+        if (!text) return
+
+        const payload = {
+            projectId: project._id,
+            sender: { _id: user._id, email: user.email },
+            message: text
+        }
+
+        try {
+            // Save message to DB (backend should return saved message object)
+            const res = await axios.post('/projects/message', payload)
+            const savedMessage = res.data.message
+
+            // Append locally (savedMessage from server should include createdAt/_id)
+            setMessages(prev => [...prev, savedMessage])
+
+            // Emit socket so other clients receive it in realtime
+            sendMessage('project-message', savedMessage)
+
+            setMessage("")
+        } catch (err) {
+            console.error("Failed to send message:", err)
+        }
     }
 
-    function WriteAiMessage(message) {
-
-        const messageObject = JSON.parse(message)
-
+    function WriteAiMessage(messageStr) {
+        const messageObject = JSON.parse(messageStr)
         return (
             <div className='overflow-auto bg-slate-950 text-white rounded-sm p-2'>
                 <Markdown
@@ -89,48 +111,59 @@ const Project = () => {
     }
 
     useEffect(() => {
-
+        // initialize socket with project id
         initializeSocket(project._id)
 
-        // ⚠️ Disable WebContainer on production
+        // WebContainer: only attempt in dev/local
         if (!import.meta.env.PROD) {
             getWebContainer().then(container => {
                 setWebContainer(container)
                 console.log("WebContainer started")
-            })
+            }).catch(e => console.warn("WebContainer boot failed:", e))
         } else {
             console.warn("WebContainer disabled on production")
         }
 
-        receiveMessage('project-message', data => {
-
-            console.log(data)
-
-            if (data.sender._id === 'ai') {
-
-                const message = JSON.parse(data.message)
-
-                if (!import.meta.env.PROD && webContainer) {
-                    webContainer.mount(message.fileTree)
-                }
-
-                if (message.fileTree) setFileTree(message.fileTree)
-
-                setMessages(prev => [...prev, data])
-            } else {
-                setMessages(prev => [...prev, data])
+        // receive socket messages
+        receiveMessage('project-message', (data) => {
+            // data is expected to be message object saved by backend
+            console.log("socket msg received:", data)
+            // Avoid adding duplicate if it's the same as the one we already appended from POST (optional)
+            setMessages(prev => {
+                // simple duplicate check by _id if present
+                if (data._id && prev.find(m => m._id === data._id)) return prev
+                return [...prev, data]
+            })
+            // if ai includes fileTree, mount locally (dev only)
+            if (data.sender?._id === 'ai' && data.fileTree && !import.meta.env.PROD && webContainer) {
+                try { webContainer.mount(data.fileTree) } catch (e) { console.warn(e) }
             }
         })
 
-        axios.get(`/projects/get-project/${location.state.project._id}`).then(res => {
+        // load project and fileTree
+        axios.get(`/projects/get-project/${project._id}`).then(res => {
             setProject(res.data.project)
             setFileTree(res.data.project.fileTree || {})
+        }).catch(e => console.log(e))
+
+        // load past messages
+        axios.get(`/projects/messages/${project._id}`).then(res => {
+            // expected { messages: [...] }
+            setMessages(res.data.messages || [])
+        }).catch(err => {
+            console.log("Failed to load messages:", err)
         })
 
+        // load users for modal
         axios.get('/users/all').then(res => {
             setUsers(res.data.users)
         }).catch(err => console.log(err))
 
+        // cleanup on unmount: (optional) disconnect socket
+        return () => {
+            // optional: if you want to disconnect socket on leaving
+            // const s = getSocket(); if (s) s.disconnect();
+        }
     }, [])
 
     function saveFileTree(ft) {
@@ -159,7 +192,7 @@ const Project = () => {
 
                     <div ref={messageBox} className="message-box p-1 flex-grow flex flex-col gap-1 overflow-auto">
                         {messages.map((msg, index) => (
-                            <div key={index}
+                            <div key={msg._id || index}
                                 className={`${msg.sender._id === 'ai' ? 'max-w-80' : 'max-w-52'} 
                                 ${msg.sender._id == user._id && 'ml-auto'} message flex flex-col p-2
                                 bg-slate-50 w-fit rounded-md`}>
@@ -210,7 +243,6 @@ const Project = () => {
             </section>
 
             <section className="right bg-red-50 flex-grow h-full flex">
-
                 <div className="explorer bg-slate-200 min-w-52">
                     <div className="file-tree">
                         {Object.keys(fileTree).map((file, index) => (
@@ -227,9 +259,7 @@ const Project = () => {
                 </div>
 
                 <div className="code-editor flex flex-col flex-grow">
-
                     <div className="top flex justify-between">
-
                         <div className="files flex">
                             {openFiles.map((file, index) => (
                                 <button key={index}
@@ -242,44 +272,32 @@ const Project = () => {
                         </div>
 
                         <div className="actions flex gap-2">
-
-                            {/* RUN BUTTON FIX */}
                             <button
                                 onClick={async () => {
-
                                     if (import.meta.env.PROD) {
                                         alert("Run is disabled on production (WebContainer not supported).");
                                         return;
                                     }
-
                                     if (!webContainer) {
                                         alert("WebContainer is not ready.");
                                         return;
                                     }
-
                                     await webContainer.mount(fileTree)
-
                                     const installProcess =
                                         await webContainer.spawn("npm", ["install"])
-
                                     installProcess.output.pipeTo(new WritableStream({
                                         write(chunk) {
                                             console.log(chunk)
                                         }
                                     }))
-
                                     if (runProcess) runProcess.kill()
-
                                     let tempRun = await webContainer.spawn("npm", ["start"])
-
                                     tempRun.output.pipeTo(new WritableStream({
                                         write(chunk) {
                                             console.log(chunk)
                                         }
                                     }))
-
                                     setRunProcess(tempRun)
-
                                     webContainer.on('server-ready', (port, url) => {
                                         setIframeUrl(url)
                                     })
@@ -327,7 +345,6 @@ const Project = () => {
                     </div>
                 </div>
 
-                {/* SHOW IFRAME ONLY LOCALLY */}
                 {!import.meta.env.PROD && iframeUrl && webContainer && (
                     <div className="flex min-w-96 flex-col h-full">
                         <div className="address-bar">
