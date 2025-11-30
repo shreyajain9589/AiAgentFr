@@ -5,14 +5,15 @@ import axios from "../config/axios";
 import { initializeSocket, receiveMessage, sendMessage } from "../config/socket";
 import Markdown from "markdown-to-jsx";
 import hljs from "highlight.js";
+import "highlight.js/styles/github-dark.css";   // ⭐ FIXED
 
 /* ---------------------- CODE HIGHLIGHT ---------------------- */
 function SyntaxHighlightedCode(props) {
     const ref = useRef(null);
 
-    React.useEffect(() => {
-        if (ref.current && props.className?.includes("lang-") && window.hljs) {
-            window.hljs.highlightElement(ref.current);
+    useEffect(() => {
+        if (ref.current && props.className?.includes("lang-")) {
+            hljs.highlightElement(ref.current);
             ref.current.removeAttribute("data-highlighted");
         }
     }, [props.className, props.children]);
@@ -21,20 +22,15 @@ function SyntaxHighlightedCode(props) {
 }
 
 const Project = () => {
+
     const location = useLocation();
     const { user } = useContext(UserContext);
 
     const initialProject = location.state?.project || {};
 
-    if (!initialProject._id) {
-        return <div className="p-5">Invalid project. Please go back.</div>;
-    }
-
     const [project, setProject] = useState(initialProject);
     const [users, setUsers] = useState([]);
-
     const [messages, setMessages] = useState(initialProject.messages || []);
-    const [message, setMessage] = useState("");
 
     const [fileTree, setFileTree] = useState(initialProject.fileTree || {});
     const [currentFile, setCurrentFile] = useState(null);
@@ -42,12 +38,12 @@ const Project = () => {
 
     const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
-
     const [selectedUserId, setSelectedUserId] = useState(new Set());
+    const [message, setMessage] = useState("");
 
     const messageBox = useRef(null);
 
-    /* ---------------------- AUTO SCROLL ---------------------- */
+    /* ---------------------- AUTO-SCROLL ---------------------- */
     useEffect(() => {
         if (messageBox.current) {
             messageBox.current.scrollTop = messageBox.current.scrollHeight;
@@ -56,6 +52,8 @@ const Project = () => {
 
     /* ---------------------- INITIAL LOAD ---------------------- */
     useEffect(() => {
+        if (!project?._id) return;
+
         initializeSocket(project._id);
 
         axios.get(`/projects/get-project/${project._id}`).then((res) => {
@@ -69,65 +67,60 @@ const Project = () => {
 
         axios.get("/users/all").then((res) => setUsers(res.data.users));
 
-        /* ---------------------- SOCKET LISTENER ---------------------- */
+        /* SOCKET MESSAGE LISTENER */
         receiveMessage("project-message", (data) => {
-            if (data.sender._id === user._id) return; // ignore own message
 
-            setMessages((prev) => [...prev, data]);
+            if (data.sender._id === user._id) return;
 
-            // ⭐ AI returned new file tree
-            if (data.sender._id === "ai") {
-                try {
-                    const parsed = JSON.parse(data.message);
+            setMessages(prev => [...prev, data]);
 
-                    if (parsed.fileTree) {
-                        const newTree = parsed.fileTree;
-                        const updatedTree = { ...fileTree, ...newTree };
+            if (data.sender._id === "ai" && data.fileTree) {
+                const newTree = data.fileTree;
 
-                        setFileTree(updatedTree);
+                const updatedTree = { ...fileTree, ...newTree };
+                setFileTree(updatedTree);
 
-                        const newFiles = Object.keys(newTree);
-                        if (newFiles.length > 0) {
-                            setOpenFiles((prev) => [...new Set([...prev, newFiles[0]])]);
-                            setCurrentFile(newFiles[0]);
-                        }
-                    }
-                } catch (err) {}
+                const newFiles = Object.keys(newTree);
+                if (newFiles.length > 0) {
+                    setOpenFiles(prev => [...new Set([...prev, newFiles[0]])]);
+                    setCurrentFile(newFiles[0]);
+                }
             }
         });
     }, []);
 
+    /* ---------------------- SELECT USER ---------------------- */
+    const handleUserClick = (id) => {
+        setSelectedUserId(prev => {
+            const s = new Set(prev);
+            s.has(id) ? s.delete(id) : s.add(id);
+            return s;
+        });
+    };
+
     /* ---------------------- ADD COLLAB ---------------------- */
     async function addCollaborators() {
-        try {
-            await axios.put("/projects/add-user", {
-                projectId: project._id,
-                users: Array.from(selectedUserId),
-            });
+        await axios.put("/projects/add-user", {
+            projectId: project._id,
+            users: Array.from(selectedUserId),
+        });
 
-            const res = await axios.get(`/projects/get-project/${project._id}`);
-            setProject(res.data.project);
+        const res = await axios.get(`/projects/get-project/${project._id}`);
+        setProject(res.data.project);
 
-            setIsModalOpen(false);
-            setSelectedUserId(new Set());
-        } catch (err) {
-            console.log(err);
-        }
+        setSelectedUserId(new Set());
+        setIsModalOpen(false);
     }
 
-    /* ---------------------- DELETE COLLAB ---------------------- */
+    /* ---------------------- REMOVE COLLAB ---------------------- */
     async function removeCollaborator(userId) {
-        try {
-            await axios.put("/projects/remove-user", {
-                projectId: project._id,
-                userId,
-            });
+        await axios.put("/projects/remove-user", {
+            projectId: project._id,
+            userId,
+        });
 
-            const res = await axios.get(`/projects/get-project/${project._id}`);
-            setProject(res.data.project);
-        } catch (err) {
-            console.log(err);
-        }
+        const res = await axios.get(`/projects/get-project/${project._id}`);
+        setProject(res.data.project);
     }
 
     /* ---------------------- SEND MESSAGE ---------------------- */
@@ -141,21 +134,16 @@ const Project = () => {
             message: text,
         };
 
-        try {
-            const res = await axios.post("/projects/message", payload);
-            const savedMessage = res.data.message;
+        const res = await axios.post("/projects/message", payload);
+        const savedMessage = res.data.message;
 
-            setMessages((prev) => [...prev, savedMessage]);
+        setMessages(prev => [...prev, savedMessage]);
+        sendMessage("project-message", savedMessage);
 
-            sendMessage("project-message", savedMessage);
-
-            setMessage("");
-        } catch (err) {
-            console.log(err);
-        }
+        setMessage("");
     };
 
-    /* ---------------------- AI MESSAGE RENDER ---------------------- */
+    /* ---------------------- AI HTML RENDER ---------------------- */
     function WriteAiMessage(msg) {
         const obj = JSON.parse(msg);
         return (
@@ -166,17 +154,17 @@ const Project = () => {
     }
 
     /* ---------------------- SAVE FILE TREE ---------------------- */
-    function saveFileTree(ft) {
+    const saveFileTree = (ft) => {
         axios.put("/projects/update-file-tree", {
             projectId: project._id,
             fileTree: ft,
         });
-    }
+    };
 
     return (
         <main className="h-screen w-screen flex overflow-hidden">
 
-            {/* LEFT CHAT PANEL */}
+            {/* ---- LEFT CHAT PANEL ---- */}
             <section className="left flex flex-col h-full min-w-96 bg-slate-300 relative">
 
                 <header className="flex justify-between items-center p-2 px-4 bg-slate-100">
@@ -193,7 +181,10 @@ const Project = () => {
                 </header>
 
                 <div className="pt-14 pb-12 flex flex-col flex-grow overflow-hidden">
-                    <div ref={messageBox} className="flex-grow p-2 flex flex-col gap-2 overflow-y-auto">
+                    <div
+                        ref={messageBox}
+                        className="flex-grow p-2 flex flex-col gap-2 overflow-y-auto"
+                    >
                         {messages.map((msg, i) => (
                             <div
                                 key={msg._id || i}
@@ -224,7 +215,7 @@ const Project = () => {
                     </div>
                 </div>
 
-                {/* SIDE PANEL */}
+                {/* ---- COLLAB LIST ---- */}
                 {isSidePanelOpen && (
                     <div className="absolute inset-0 bg-slate-50 flex flex-col z-20">
                         <header className="flex justify-between p-2 bg-slate-200">
@@ -238,14 +229,14 @@ const Project = () => {
                             {project.users?.map((u) => (
                                 <div
                                     key={u._id}
-                                    className="flex items-center justify-between gap-2 p-2 bg-slate-100 rounded mb-2"
+                                    className="flex items-center justify-between p-2 bg-slate-100 rounded mb-2"
                                 >
-                                    <div className="flex items-center gap-2">
+                                    <span className="flex items-center gap-2">
                                         <div className="p-3 bg-slate-600 text-white rounded-full">
                                             <i className="ri-user-fill"></i>
                                         </div>
-                                        <span>{u.email}</span>
-                                    </div>
+                                        {u.email}
+                                    </span>
 
                                     <button
                                         onClick={() => removeCollaborator(u._id)}
@@ -260,16 +251,17 @@ const Project = () => {
                 )}
             </section>
 
-            {/* RIGHT PANEL */}
+            {/* ---- RIGHT CODE PANEL ---- */}
             <section className="right flex-grow h-full flex">
 
+                {/* FILELIST */}
                 <div className="explorer min-w-52 bg-slate-200 overflow-auto">
                     {Object.keys(fileTree).map((file, i) => (
                         <button
                             key={i}
                             onClick={() => {
                                 setCurrentFile(file);
-                                setOpenFiles((prev) => [...new Set([...prev, file])]);
+                                setOpenFiles(prev => [...new Set([...prev, file])]);
                             }}
                             className="p-2 px-4 bg-slate-300 w-full text-left border-b"
                         >
@@ -278,9 +270,11 @@ const Project = () => {
                     ))}
                 </div>
 
+                {/* EDITOR */}
                 <div className="code-editor flex flex-col flex-grow overflow-hidden">
 
                     <div className="top flex items-center justify-between bg-white p-2">
+
                         <div className="files flex">
                             {openFiles.map((f, i) => (
                                 <button
@@ -296,7 +290,9 @@ const Project = () => {
                         </div>
 
                         <button
-                            onClick={() => alert("⚠️ Vercel does NOT support WebContainer.\nRun works only locally.")}
+                            onClick={() =>
+                                alert("⚠️ Vercel does NOT support WebContainer.\nRun works only locally.")
+                            }
                             className="bg-slate-800 text-white px-4 py-1 rounded"
                         >
                             Run
@@ -314,7 +310,9 @@ const Project = () => {
                                             const updated = e.target.innerText;
                                             const ft = {
                                                 ...fileTree,
-                                                [currentFile]: { file: { contents: updated } },
+                                                [currentFile]: {
+                                                    file: { contents: updated }
+                                                },
                                             };
                                             setFileTree(ft);
                                             saveFileTree(ft);
@@ -330,10 +328,11 @@ const Project = () => {
                             </div>
                         )}
                     </div>
+
                 </div>
             </section>
 
-            {/* MODAL */}
+            {/* ---- ADD COLLAB MODAL ---- */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                     <div className="w-96 bg-white rounded-md p-4 flex flex-col max-h-[90vh]">
@@ -349,11 +348,7 @@ const Project = () => {
                             {users.map((u) => (
                                 <div
                                     key={u._id}
-                                    onClick={() => setSelectedUserId(prev => {
-                                        const s = new Set(prev);
-                                        s.has(u._id) ? s.delete(u._id) : s.add(u._id);
-                                        return s;
-                                    })}
+                                    onClick={() => handleUserClick(u._id)}
                                     className={`p-2 flex items-center gap-2 cursor-pointer rounded ${
                                         selectedUserId.has(u._id)
                                             ? "bg-slate-300"
@@ -374,9 +369,11 @@ const Project = () => {
                         >
                             Add Collaborators
                         </button>
+
                     </div>
                 </div>
             )}
+
         </main>
     );
 };

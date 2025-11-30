@@ -1,20 +1,20 @@
-import React, { useContext, useState, useEffect } from 'react'
-import { UserContext } from '../context/user.context'
-import axios from "../config/axios"
-import { useNavigate } from 'react-router-dom'
+import React, { useContext, useState, useEffect } from 'react';
+import { UserContext } from '../context/user.context';
+import axios from "../config/axios";
+import { useNavigate } from 'react-router-dom';
 
 const Home = () => {
 
     const { user } = useContext(UserContext)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [projectName, setProjectName] = useState("");
-    const [projects, setProjects] = useState([])
+    const [projects, setProjects] = useState([]);
 
-    const navigate = useNavigate()
+    const navigate = useNavigate();
 
     /* ---------------------- CREATE PROJECT ---------------------- */
     async function createProject(e) {
-        e.preventDefault()
+        e.preventDefault();
 
         if (!projectName.trim()) return;
 
@@ -25,13 +25,13 @@ const Home = () => {
 
             const newProject = res.data.project;
 
-            // ⭐ Add project instantly to UI
+            // Add immediately to UI
             setProjects(prev => [...prev, newProject]);
 
             setProjectName("");
             setIsModalOpen(false);
 
-            // ⭐ Navigate directly to the newly created project
+            // Navigate to new project
             navigate("/project", { state: { project: newProject } });
 
         } catch (error) {
@@ -43,10 +43,10 @@ const Home = () => {
     useEffect(() => {
         axios.get('/projects/all')
             .then((res) => {
-                setProjects(res.data.projects)
+                setProjects(res.data.projects || []);
             })
-            .catch(err => console.log(err))
-    }, [])
+            .catch(err => console.log(err));
+    }, []);
 
     return (
         <main className='p-4'>
@@ -61,28 +61,32 @@ const Home = () => {
                 </button>
 
                 {/* PROJECT LIST */}
-                {projects.map((project) => (
-                    <div
-                        key={project._id}
-                        onClick={() =>
-                            navigate(`/project`, { state: { project } })
-                        }
-                        className="project flex flex-col gap-2 cursor-pointer p-4 
+                {projects
+                    .filter(p => p && p.name)  // SAFETY FIX
+                    .map((project) => (
+                        <div
+                            key={project._id}
+                            onClick={() =>
+                                navigate(`/project`, { state: { project } })
+                            }
+                            className="project flex flex-col gap-2 cursor-pointer p-4 
                         border border-slate-300 rounded-md min-w-52 hover:bg-slate-200"
-                    >
-                        <h2 className='font-semibold'>{project.name}</h2>
+                        >
+                            <h2 className='font-semibold'>{project.name}</h2>
 
-                        <div className="flex gap-2">
-                            <p>
-                                <small>
-                                    <i className="ri-user-line"></i> Collaborators
-                                </small>
-                                :
-                            </p>
-                            {project.users.length}
+                            <div className="flex gap-2">
+                                <p>
+                                    <small>
+                                        <i className="ri-user-line"></i> Collaborators
+                                    </small>
+                                    :
+                                </p>
+
+                                {(project.users || []).length}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    ))
+                }
             </div>
 
             {/* MODAL */}
@@ -130,6 +134,6 @@ const Home = () => {
 
         </main>
     )
-}
+};
 
-export default Home
+export default Home;
