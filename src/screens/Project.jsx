@@ -65,11 +65,10 @@ const Project = () => {
 
             setIsModalOpen(false);
 
-            // ⭐ FIX: RE-FETCH PROJECT WITH POPULATED USERS
-            const res2 = await axios.get(`/projects/get-project/${project._id}`);
-            setProject(res2.data.project);
+            // re-fetch updated project with emails populated
+            const res = await axios.get(`/projects/get-project/${project._id}`);
+            setProject(res.data.project);
 
-            // Clear selection
             setSelectedUserId(new Set());
         } catch (err) {
             console.log(err);
@@ -84,7 +83,6 @@ const Project = () => {
                 userId,
             });
 
-            // re-fetch project again to restore populated emails
             const res = await axios.get(`/projects/get-project/${project._id}`);
             setProject(res.data.project);
         } catch (err) {
@@ -108,6 +106,7 @@ const Project = () => {
             const savedMessage = res.data.message;
 
             setMessages((prev) => [...prev, savedMessage]);
+
             sendMessage("project-message", savedMessage);
 
             setMessage("");
@@ -130,6 +129,7 @@ const Project = () => {
     useEffect(() => {
         initializeSocket(project._id);
 
+        // Load project + users + messages
         axios.get(`/projects/get-project/${project._id}`).then((res) => {
             setProject(res.data.project);
             setFileTree(res.data.project.fileTree || {});
@@ -140,6 +140,13 @@ const Project = () => {
         });
 
         axios.get("/users/all").then((res) => setUsers(res.data.users));
+
+        /* ---------------------- FIX DUPLICATE MESSAGES ---------------------- */
+        receiveMessage("project-message", (data) => {
+            if (data.sender._id === user._id) return; // prevent duplicate
+
+            setMessages((prev) => [...prev, data]);
+        });
     }, []);
 
     /* ---------------------- SAVE FILE TREE ---------------------- */
@@ -170,7 +177,7 @@ const Project = () => {
                     </button>
                 </header>
 
-                {/* CHAT AREA */}
+                {/* CHAT */}
                 <div className="pt-14 pb-12 flex flex-col flex-grow overflow-hidden">
                     <div
                         ref={messageBox}
@@ -193,6 +200,7 @@ const Project = () => {
                         ))}
                     </div>
 
+                    {/* INPUT */}
                     <div className="absolute bottom-0 left-0 w-full flex bg-white">
                         <input
                             value={message}
@@ -229,7 +237,7 @@ const Project = () => {
                                         <span>{u.email}</span>
                                     </div>
 
-                                    {/* DELETE ICON */}
+                                    {/* DELETE */}
                                     <button
                                         onClick={() => removeCollaborator(u._id)}
                                         className="text-red-600 hover:text-red-800 text-xl"
@@ -243,10 +251,9 @@ const Project = () => {
                 )}
             </section>
 
-            {/* RIGHT CODE PANEL */}
+            {/* RIGHT PANEL */}
             <section className="right flex-grow h-full flex">
 
-                {/* FILE TREE */}
                 <div className="explorer min-w-52 bg-slate-200 overflow-auto">
                     {Object.keys(fileTree).map((file, i) => (
                         <button
@@ -262,10 +269,8 @@ const Project = () => {
                     ))}
                 </div>
 
-                {/* CODE EDITOR */}
                 <div className="code-editor flex flex-col flex-grow overflow-hidden">
 
-                    {/* TABS */}
                     <div className="top flex items-center justify-between bg-white p-2">
                         <div className="files flex">
                             {openFiles.map((f, i) => (
@@ -291,7 +296,6 @@ const Project = () => {
                         </button>
                     </div>
 
-                    {/* EDITOR */}
                     <div className="bottom flex flex-grow overflow-auto">
                         {fileTree[currentFile] && (
                             <div className="flex-grow bg-white p-3">
